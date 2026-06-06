@@ -1,0 +1,118 @@
+# 🤖 Google Maps → Telegram Bot — Algérie (Sans Site Web)
+
+## Ce que fait le bot
+- Scrape Google Maps pour trouver les commerces **sans site web** en Algérie
+- Détecte **automatiquement** le type de commerce (restaurant, pharmacie, coiffeur...)
+- Récupère l'**adresse complète**, le **numéro de téléphone** et la **note Google**
+- Envoie chaque résultat directement sur **Telegram**
+- Sauvegarde tout en **JSON**
+
+---
+
+## 📋 Prérequis
+
+### 1. Clé API Google Maps (gratuite au départ)
+1. Aller sur https://console.cloud.google.com
+2. Créer un projet
+3. Activer **Places API** (chercher dans la bibliothèque d'APIs)
+4. Créer une clé API dans **Identifiants**
+5. Google offre 200$/mois gratuits (~5 000 recherches)
+
+### 2. Bot Telegram
+1. Ouvrir Telegram → chercher **@BotFather**
+2. Envoyer `/newbot` → suivre les instructions
+3. Copier le **TOKEN** donné
+
+### 3. Ton Chat ID Telegram
+1. Chercher **@userinfobot** sur Telegram
+2. Envoyer `/start` → il te donne ton **Chat ID**
+
+---
+
+## 🚀 Installation
+
+```bash
+# 1. Installer les dépendances
+pip install -r requirements.txt
+
+# 2. Configurer les variables d'environnement
+export GOOGLE_API_KEY="AIzaSy..."
+export TELEGRAM_TOKEN="1234567890:AAF..."
+export TELEGRAM_CHAT_ID="123456789"
+
+# 3. Lancer le bot
+python bot.py
+```
+
+### Sur Windows (PowerShell)
+```powershell
+$env:GOOGLE_API_KEY="AIzaSy..."
+$env:TELEGRAM_TOKEN="1234567890:AAF..."
+$env:TELEGRAM_CHAT_ID="123456789"
+python bot.py
+```
+
+---
+
+## ⚙️ Configuration dans bot.py
+
+```python
+# Wilayas à scraper (ligne 28)
+WILAYAS = [
+    "Alger, Algérie",
+    "Oran, Algérie",
+    "Constantine, Algérie",
+    # Ajouter d'autres wilayas ici
+]
+
+# Résultats max par wilaya (ligne 34)
+MAX_RESULTS_PER_WILAYA = 60
+```
+
+---
+
+## 📱 Exemple de message Telegram reçu
+
+```
+🍽️ Restaurant El Bahja
+━━━━━━━━━━━━━━━━━━━━
+📂 Type : Restaurant
+📍 Adresse : 12 Rue Didouche Mourad, Alger
+📞 Contact : 0555 12 34 56
+⭐ Note : ⭐⭐⭐⭐ 4.2/5 (87 avis)
+🌐 Site web : ❌ Aucun
+🗺️ Voir sur Google Maps
+📅 12/06/2025 14:32
+```
+
+---
+
+## 💾 Fichier JSON généré
+
+```json
+[
+  {
+    "name": "Restaurant El Bahja",
+    "type": "Restaurant",
+    "type_emoji": "🍽️",
+    "address": "12 Rue Didouche Mourad, Alger",
+    "phone": "0555 12 34 56",
+    "rating": 4.2,
+    "reviews": 87,
+    "wilaya": "Alger",
+    "maps_url": "https://www.google.com/maps/place/..."
+  }
+]
+```
+
+---
+
+## 💡 Conseils
+
+- **Quota Google** : Places API coûte ~0.017$/requête (détails) → bien surveiller
+- **Rate limit Telegram** : le bot attend 1.5s entre chaque message automatiquement
+- **Planifier** : utiliser `cron` (Linux) ou le Planificateur de tâches (Windows) pour lancer automatiquement toutes les semaines
+- **Cron exemple** (tous les lundis à 8h) :
+  ```
+  0 8 * * 1 cd /chemin/bot && python bot.py >> bot.log 2>&1
+  ```
