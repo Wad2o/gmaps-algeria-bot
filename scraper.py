@@ -1,7 +1,7 @@
 """
 Google Maps → Telegram Bot
 Scrape les magasins SANS site web en Algérie
-Détecte automatiquement : type, adresse, contact
+Via SerpApi (pas de carte bancaire requise)
 """
 
 import asyncio
@@ -21,24 +21,19 @@ from telegram.error import TelegramError
 
 # ─── CONFIGURATION ────────────────────────────────────────────────────────────
 
-GOOGLE_API_KEY   = os.getenv("GOOGLE_API_KEY", "VOTRE_CLE_GOOGLE_API")
-TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "VOTRE_TOKEN_TELEGRAM")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "VOTRE_CHAT_ID")
+SERPAPI_KEY      = os.getenv("SERPAPI_KEY", "COLLE_TA_CLE_ICI")
+TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "COLLE_TON_TOKEN_ICI")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "COLLE_TON_CHAT_ID_ICI")
 
-# Wilayas à scraper (modifiable)
 WILAYAS = [
-    "Alger, Algérie",
-    "Oran, Algérie",
-    "Constantine, Algérie",
-    "Annaba, Algérie",
-    "Blida, Algérie",
+    "Alger",
+    "Oran",
+    "Constantine",
+    "Annaba",
+    "Blida",
 ]
 
-# Délai entre chaque envoi Telegram (secondes) — évite le rate-limit
 SEND_DELAY = 1.5
-
-# Nombre max de résultats par wilaya
-MAX_RESULTS_PER_WILAYA = 60
 
 # ─── LOGGING ──────────────────────────────────────────────────────────────────
 
@@ -52,74 +47,45 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ─── TYPES DE COMMERCES ───────────────────────────────────────────────────────
+# ─── TYPES ────────────────────────────────────────────────────────────────────
 
-# Mapping type Google Maps → emoji + label français
-TYPE_MAP = {
-    "restaurant":            ("🍽️", "Restaurant"),
-    "food":                  ("🍽️", "Restauration"),
-    "cafe":                  ("☕", "Café"),
-    "bakery":                ("🥖", "Boulangerie"),
-    "meal_takeaway":         ("🥡", "Restauration rapide"),
-    "meal_delivery":         ("🛵", "Livraison repas"),
-    "bar":                   ("🍺", "Bar"),
-    "night_club":            ("🎵", "Boîte de nuit"),
-    "pharmacy":              ("💊", "Pharmacie"),
-    "doctor":                ("🩺", "Médecin"),
-    "dentist":               ("🦷", "Dentiste"),
-    "hospital":              ("🏥", "Hôpital"),
-    "health":                ("🏥", "Santé"),
-    "beauty_salon":          ("💅", "Salon de beauté"),
-    "hair_care":             ("💇", "Coiffeur"),
-    "spa":                   ("🧖", "Spa"),
-    "clothing_store":        ("👗", "Boutique vêtements"),
-    "shoe_store":            ("👟", "Chaussures"),
-    "jewelry_store":         ("💍", "Bijouterie"),
-    "store":                 ("🏪", "Magasin"),
-    "supermarket":           ("🛒", "Supermarché"),
-    "convenience_store":     ("🏬", "Épicerie"),
-    "grocery_or_supermarket":("🛒", "Épicerie/Supermarché"),
-    "department_store":      ("🏬", "Grand magasin"),
-    "shopping_mall":         ("🛍️", "Centre commercial"),
-    "electronics_store":     ("📱", "Électronique"),
-    "hardware_store":        ("🔧", "Quincaillerie"),
-    "home_goods_store":      ("🛋️", "Maison / Déco"),
-    "furniture_store":       ("🪑", "Meubles"),
-    "book_store":            ("📚", "Librairie"),
-    "pet_store":             ("🐾", "Animalerie"),
-    "florist":               ("💐", "Fleuriste"),
-    "car_repair":            ("🔩", "Mécanicien auto"),
-    "car_dealer":            ("🚗", "Concessionnaire"),
-    "car_wash":              ("🚿", "Lavage auto"),
-    "gas_station":           ("⛽", "Station-service"),
-    "lodging":               ("🏨", "Hébergement"),
-    "real_estate_agency":    ("🏠", "Immobilier"),
-    "travel_agency":         ("✈️", "Agence de voyage"),
-    "bank":                  ("🏦", "Banque"),
-    "atm":                   ("💳", "DAB / ATM"),
-    "insurance_agency":      ("📋", "Assurance"),
-    "accounting":            ("📊", "Comptabilité"),
-    "lawyer":                ("⚖️", "Avocat"),
-    "school":                ("🏫", "École"),
-    "university":            ("🎓", "Université"),
-    "gym":                   ("💪", "Salle de sport"),
-    "laundry":               ("👕", "Laverie"),
-    "electrician":           ("⚡", "Électricien"),
-    "plumber":               ("🔧", "Plombier"),
-    "painter":               ("🎨", "Peintre"),
-    "moving_company":        ("📦", "Déménagement"),
-    "storage":               ("📦", "Stockage"),
-    "post_office":           ("📮", "Poste"),
-    "printing":              ("🖨️", "Imprimerie"),
-    "point_of_interest":     ("📍", "Point d'intérêt"),
-    "establishment":         ("🏢", "Établissement"),
-}
+KEYWORDS_TYPE = [
+    (["restaurant", "pizza", "burger", "grill", "kebab", "brasserie", "traiteur"], ("🍽️", "Restaurant")),
+    (["café", "cafe", "coffee", "thé", "salon de thé"],                            ("☕", "Café")),
+    (["boulangerie", "pâtisserie", "gateau", "patisserie"],                         ("🥖", "Boulangerie")),
+    (["pharmacie", "parapharmacie"],                                                ("💊", "Pharmacie")),
+    (["médecin", "docteur", "clinique", "cabinet médical"],                         ("🩺", "Médecin")),
+    (["dentiste", "dentaire"],                                                      ("🦷", "Dentiste")),
+    (["coiffeur", "coiffure", "barbier", "barber"],                                 ("💇", "Coiffeur")),
+    (["beauty", "esthétique", "esthetique", "spa", "ongle"],                        ("💅", "Beauté")),
+    (["vêtement", "vetement", "mode", "boutique", "friperie", "textile"],           ("👗", "Boutique vêtements")),
+    (["chaussure", "shoe"],                                                         ("👟", "Chaussures")),
+    (["bijou", "bijouterie", "jewelry", "or ", "argent"],                           ("💍", "Bijouterie")),
+    (["épicerie", "epicerie", "alimentation", "grocery"],                           ("🛒", "Épicerie")),
+    (["supermarché", "supermarche", "marché", "marche"],                            ("🏬", "Supermarché")),
+    (["électronique", "electronique", "informatique", "téléphone", "telephone", "gsm", "mobile", "iphone", "samsung"], ("📱", "Électronique")),
+    (["électroménager", "electromenager", "climatiseur", "refrigerateur"],          ("🏠", "Électroménager")),
+    (["meuble", "décoration", "decoration", "home"],                                ("🪑", "Meubles / Déco")),
+    (["librairie", "livre", "papeterie", "fourniture"],                             ("📚", "Librairie")),
+    (["mécanicien", "mecanicien", "auto", "garage", "carrosserie", "pneu"],        ("🔩", "Mécanicien auto")),
+    (["station", "essence", "carburant"],                                           ("⛽", "Station-service")),
+    (["quincaillerie", "matériaux", "materiaux", "bricolage", "peinture"],          ("🔧", "Quincaillerie")),
+    (["immobilier", "agence immobilière", "location"],                              ("🏠", "Immobilier")),
+    (["banque", "bank", "assurance", "credit"],                                     ("🏦", "Banque / Finance")),
+    (["école", "ecole", "formation", "cours", "académie", "academie"],              ("🏫", "École / Formation")),
+    (["sport", "gym", "fitness", "salle de sport"],                                 ("💪", "Sport")),
+    (["hôtel", "hotel", "résidence", "residence", "auberge"],                       ("🏨", "Hôtel")),
+    (["voyage", "tourisme", "agence de voyage"],                                    ("✈️", "Agence de voyage")),
+    (["imprimerie", "impression", "copie", "reprographie"],                         ("🖨️", "Imprimerie")),
+    (["fleur", "fleuriste", "plante"],                                              ("💐", "Fleuriste")),
+    (["laverie", "pressing", "nettoyage"],                                          ("👕", "Laverie")),
+]
 
-def get_type_label(google_types: list) -> tuple[str, str]:
-    """Retourne (emoji, label) du type principal du commerce."""
-    for t in google_types:
-        if t in TYPE_MAP:
-            return TYPE_MAP[t]
+def detect_type(name: str, category: str = "") -> tuple:
+    text = (name + " " + category).lower()
+    for keywords, result in KEYWORDS_TYPE:
+        if any(kw in text for kw in keywords):
+            return result
     return ("🏪", "Commerce")
 
 
@@ -127,122 +93,84 @@ def get_type_label(google_types: list) -> tuple[str, str]:
 
 @dataclass
 class Place:
-    place_id:    str
-    name:        str
-    address:     str
-    phone:       str
-    rating:      Optional[float]
-    reviews:     int
-    type_emoji:  str
-    type_label:  str
-    wilaya:      str
-    maps_url:    str
-    raw_types:   list = field(default_factory=list)
+    name:       str
+    address:    str
+    phone:      str
+    rating:     Optional[float]
+    reviews:    int
+    type_emoji: str
+    type_label: str
+    wilaya:     str
+    maps_url:   str
 
 
-# ─── GOOGLE MAPS API ──────────────────────────────────────────────────────────
+# ─── SERPAPI ──────────────────────────────────────────────────────────────────
 
-BASE_URL = "https://maps.googleapis.com/maps/api/place"
-
-def search_places(wilaya: str, page_token: str = None) -> dict:
-    """Cherche tous les établissements dans une wilaya."""
+def search_places(wilaya: str, start: int = 0) -> list:
+    """Cherche des commerces via SerpApi Google Maps."""
     params = {
-        "query":    f"magasin commerce boutique {wilaya}",
-        "language": "fr",
-        "region":   "dz",
-        "key":      GOOGLE_API_KEY,
+        "engine":   "google_maps",
+        "q":        f"magasins commerces boutiques {wilaya} Algérie",
+        "hl":       "fr",
+        "gl":       "dz",
+        "start":    start,
+        "api_key":  SERPAPI_KEY,
     }
-    if page_token:
-        params = {"pagetoken": page_token, "key": GOOGLE_API_KEY}
-        time.sleep(2)  # Requis par l'API avant d'utiliser un page_token
-
-    r = requests.get(f"{BASE_URL}/textsearch/json", params=params, timeout=10)
+    r = requests.get("https://serpapi.com/search", params=params, timeout=15)
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+    return data.get("local_results", [])
 
 
-def get_place_details(place_id: str) -> dict:
-    """Récupère les détails complets d'un lieu (téléphone, site web, types...)."""
-    params = {
-        "place_id": place_id,
-        "fields":   "name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,types,url",
-        "language": "fr",
-        "key":      GOOGLE_API_KEY,
-    }
-    r = requests.get(f"{BASE_URL}/details/json", params=params, timeout=10)
-    r.raise_for_status()
-    return r.json().get("result", {})
-
-
-def scrape_wilaya(wilaya: str, max_results: int = MAX_RESULTS_PER_WILAYA) -> list[Place]:
-    """Scrape tous les commerces sans site web d'une wilaya."""
+def scrape_wilaya(wilaya: str) -> list[Place]:
     log.info(f"▶ Scraping: {wilaya}")
     places_found = []
-    seen_ids = set()
-    page_token = None
-    page = 1
+    seen = set()
 
-    while len(places_found) < max_results:
-        log.info(f"  Page {page} — {wilaya}")
+    for start in range(0, 3):  # 3 pages SerpApi
         try:
-            data = search_places(wilaya, page_token)
+            results = search_places(wilaya, start)
         except Exception as e:
-            log.error(f"  Erreur recherche: {e}")
+            log.error(f"  Erreur SerpApi: {e}")
             break
 
-        results = data.get("results", [])
         if not results:
             break
 
         for r in results:
-            if len(places_found) >= max_results:
-                break
-
-            pid = r.get("place_id")
-            if not pid or pid in seen_ids:
+            name = r.get("title", "").strip()
+            if not name or name in seen:
                 continue
-            seen_ids.add(pid)
+            seen.add(name)
 
-            # Récupère les détails pour vérifier le site web
-            try:
-                details = get_place_details(pid)
-            except Exception as e:
-                log.warning(f"  Détails introuvables pour {pid}: {e}")
+            # Filtre : sans site web
+            if r.get("website"):
                 continue
 
-            # ── Filtre : sans site web ──────────────────────────────────────
-            if details.get("website"):
-                continue
+            phone   = r.get("phone", "Non disponible").strip()
+            address = r.get("address", "N/A").strip()
+            rating  = r.get("rating")
+            reviews = r.get("reviews", 0)
+            maps_url = r.get("link") or r.get("place_id") or "https://maps.google.com"
+            category = r.get("type", "")
 
-            phone = details.get("formatted_phone_number", "").strip()
-            address = details.get("formatted_address", r.get("formatted_address", "N/A")).strip()
-            rating = details.get("rating") or r.get("rating")
-            reviews = details.get("user_ratings_total") or r.get("user_ratings_total", 0)
-            raw_types = details.get("types") or r.get("types", [])
-            maps_url = details.get("url") or f"https://www.google.com/maps/place/?q=place_id:{pid}"
-
-            emoji, label = get_type_label(raw_types)
+            emoji, label = detect_type(name, category)
 
             place = Place(
-                place_id   = pid,
-                name       = details.get("name") or r.get("name", "Inconnu"),
+                name       = name,
                 address    = address,
-                phone      = phone or "Non disponible",
+                phone      = phone,
                 rating     = rating,
                 reviews    = reviews,
                 type_emoji = emoji,
                 type_label = label,
-                wilaya     = wilaya.replace(", Algérie", ""),
+                wilaya     = wilaya,
                 maps_url   = maps_url,
-                raw_types  = raw_types,
             )
             places_found.append(place)
-            log.info(f"  ✓ {place.name} [{label}] — {phone or 'pas de tél'}")
+            log.info(f"  ✓ {name} [{label}] — {phone}")
 
-        page_token = data.get("next_page_token")
-        if not page_token:
-            break
-        page += 1
+        time.sleep(1)
 
     log.info(f"  → {len(places_found)} commerces sans site trouvés à {wilaya}")
     return places_found
@@ -250,155 +178,116 @@ def scrape_wilaya(wilaya: str, max_results: int = MAX_RESULTS_PER_WILAYA) -> lis
 
 # ─── TELEGRAM ─────────────────────────────────────────────────────────────────
 
-def format_message(place: Place) -> str:
-    """Formate un message Telegram pour un commerce."""
-    stars = ""
-    if place.rating:
-        full = int(place.rating)
-        stars = "⭐" * full + f" {place.rating}/5 ({place.reviews} avis)"
-    else:
-        stars = "Pas de note"
-
-    msg = (
-        f"{place.type_emoji} *{escape_md(place.name)}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📂 *Type :* {escape_md(place.type_label)}\n"
-        f"📍 *Adresse :* {escape_md(place.address)}\n"
-        f"📞 *Contact :* `{escape_md(place.phone)}`\n"
-        f"⭐ *Note :* {escape_md(stars)}\n"
-        f"🌐 *Site web :* ❌ Aucun\n"
-        f"🗺️ [Voir sur Google Maps]({place.maps_url})\n"
-        f"📅 _{escape_md(datetime.now().strftime('%d/%m/%Y %H:%M'))}_"
-    )
-    return msg
-
-
 def escape_md(text: str) -> str:
-    """Échappe les caractères spéciaux MarkdownV2."""
     if not text:
         return ""
     chars = r"_*[]()~`>#+-=|{}.!\\"
     return re.sub(f"([{re.escape(chars)}])", r"\\\1", str(text))
 
 
-async def send_to_telegram(bot: Bot, message: str):
-    """Envoie un message Telegram avec retry automatique."""
+def format_message(place: Place) -> str:
+    if place.rating:
+        stars = "⭐" * int(place.rating)
+        note  = f"{stars} {place.rating}/5 ({place.reviews} avis)"
+    else:
+        note = "Pas de note"
+
+    return (
+        f"{place.type_emoji} *{escape_md(place.name)}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📂 *Type :* {escape_md(place.type_label)}\n"
+        f"📍 *Adresse :* {escape_md(place.address)}\n"
+        f"📞 *Contact :* `{escape_md(place.phone)}`\n"
+        f"⭐ *Note :* {escape_md(note)}\n"
+        f"🌐 *Site web :* ❌ Aucun\n"
+        f"🗺️ [Voir sur Google Maps]({place.maps_url})\n"
+        f"📅 _{escape_md(datetime.now().strftime('%d/%m/%Y %H:%M'))}_"
+    )
+
+
+async def send_msg(bot: Bot, text: str):
     for attempt in range(3):
         try:
             await bot.send_message(
                 chat_id    = TELEGRAM_CHAT_ID,
-                text       = message,
+                text       = text,
                 parse_mode = ParseMode.MARKDOWN_V2,
-                disable_web_page_preview = False,
+                disable_web_page_preview = True,
             )
             return
         except TelegramError as e:
             if "Too Many Requests" in str(e):
-                wait = 30 + attempt * 15
-                log.warning(f"  Rate limit Telegram — attente {wait}s")
-                await asyncio.sleep(wait)
+                await asyncio.sleep(30 + attempt * 15)
             else:
-                log.error(f"  Erreur Telegram: {e}")
-                break
+                log.error(f"Telegram error: {e}")
+                return
 
 
-async def send_summary(bot: Bot, stats: dict):
-    """Envoie un résumé global à la fin."""
-    lines = [f"📊 *Rapport de scraping — Algérie*\n━━━━━━━━━━━━━━━━━━━━"]
-    total = 0
-    for wilaya, count in stats["by_wilaya"].items():
-        lines.append(f"  🏙️ {escape_md(wilaya)}: *{count}* commerces")
-        total += count
-    lines.append(f"\n✅ *Total :* {total} commerces sans site web")
-    lines.append(f"📅 _{escape_md(datetime.now().strftime('%d/%m/%Y %H:%M'))}_")
-
-    await bot.send_message(
-        chat_id    = TELEGRAM_CHAT_ID,
-        text       = "\n".join(lines),
-        parse_mode = ParseMode.MARKDOWN_V2,
-    )
-
-
-# ─── SAUVEGARDE JSON ──────────────────────────────────────────────────────────
-
-def save_results(all_places: list[Place]):
-    """Sauvegarde tous les résultats en JSON."""
+def save_json(all_places: list[Place]):
     filename = f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    data = [
-        {
-            "name":       p.name,
-            "type":       p.type_label,
-            "type_emoji": p.type_emoji,
-            "address":    p.address,
-            "phone":      p.phone,
-            "rating":     p.rating,
-            "reviews":    p.reviews,
-            "wilaya":     p.wilaya,
-            "maps_url":   p.maps_url,
-        }
-        for p in all_places
-    ]
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    log.info(f"💾 Résultats sauvegardés: {filename}")
-    return filename
+        json.dump([
+            {
+                "nom":     p.name,
+                "type":    p.type_label,
+                "adresse": p.address,
+                "contact": p.phone,
+                "note":    p.rating,
+                "avis":    p.reviews,
+                "wilaya":  p.wilaya,
+                "maps":    p.maps_url,
+            }
+            for p in all_places
+        ], f, ensure_ascii=False, indent=2)
+    log.info(f"💾 Sauvegardé: {filename}")
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 async def main():
-    log.info("=" * 60)
-    log.info("  GOOGLE MAPS → TELEGRAM BOT  |  Algérie Sans-Site")
-    log.info("=" * 60)
+    log.info("=" * 55)
+    log.info("  GOOGLE MAPS → TELEGRAM  |  Algérie Sans-Site")
+    log.info("=" * 55)
 
     bot = Bot(token=TELEGRAM_TOKEN)
 
-    # Message de démarrage
-    await bot.send_message(
-        chat_id    = TELEGRAM_CHAT_ID,
-        text       = (
-            "🤖 *Bot démarré\\!*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "🔍 Scraping Google Maps en cours\\.\\.\\.\n"
-            "📋 Filtrage: magasins *sans site web* uniquement\n"
-            f"🏙️ Wilayas: {escape_md(', '.join(w.replace(', Algérie','') for w in WILAYAS))}"
-        ),
-        parse_mode = ParseMode.MARKDOWN_V2,
+    await send_msg(bot,
+        "🤖 *Bot démarré\\!*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🔍 Scraping Google Maps via SerpApi\\.\\.\\.\n"
+        "📋 Filtre: magasins *sans site web* uniquement\n"
+        f"🏙️ Wilayas: {escape_md(', '.join(WILAYAS))}"
     )
 
     all_places = []
-    stats = {"by_wilaya": {}}
+    stats = {}
 
     for wilaya in WILAYAS:
-        wilaya_name = wilaya.replace(", Algérie", "")
         places = scrape_wilaya(wilaya)
-        stats["by_wilaya"][wilaya_name] = len(places)
+        stats[wilaya] = len(places)
         all_places.extend(places)
 
-        # En-tête wilaya sur Telegram
         if places:
-            await bot.send_message(
-                chat_id    = TELEGRAM_CHAT_ID,
-                text       = (
-                    f"🏙️ *{escape_md(wilaya_name)}* — "
-                    f"{len(places)} commerces sans site trouvés"
-                ),
-                parse_mode = ParseMode.MARKDOWN_V2,
+            await send_msg(bot,
+                f"🏙️ *{escape_md(wilaya)}* — "
+                f"{len(places)} commerces sans site trouvés"
             )
 
-        # Envoie chaque commerce
         for place in places:
-            msg = format_message(place)
-            await send_to_telegram(bot, msg)
+            await send_msg(bot, format_message(place))
             await asyncio.sleep(SEND_DELAY)
 
-    # Sauvegarde JSON
-    if all_places:
-        save_results(all_places)
+    save_json(all_places)
 
-    # Résumé final
-    await send_summary(bot, stats)
-    log.info("✅ Bot terminé.")
+    # Résumé
+    lines = ["📊 *Rapport final — Algérie*\n━━━━━━━━━━━━━━━━━━━━"]
+    for w, c in stats.items():
+        lines.append(f"  🏙️ {escape_md(w)}: *{c}* commerces")
+    lines.append(f"\n✅ *Total :* {len(all_places)} commerces sans site")
+    lines.append(f"📅 _{escape_md(datetime.now().strftime('%d/%m/%Y %H:%M'))}_")
+    await send_msg(bot, "\n".join(lines))
+
+    log.info("✅ Terminé.")
 
 
 if __name__ == "__main__":
